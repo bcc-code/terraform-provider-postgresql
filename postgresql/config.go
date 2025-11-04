@@ -217,6 +217,8 @@ func (c *Config) featureSupported(name featureName) bool {
 func (c *Config) connParams() []string {
 	params := map[string]string{}
 
+	params["binary_mode"] = "on"
+
 	// sslmode and connect_timeout are not allowed with gocloud
 	// (TLS is provided by gocloud directly)
 	if c.Scheme == "postgres" {
