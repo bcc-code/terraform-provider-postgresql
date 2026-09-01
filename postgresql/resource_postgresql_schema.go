@@ -118,6 +118,26 @@ func resourcePostgreSQLSchema() *schema.Resource {
 
 func resourcePostgreSQLSchemaCreate(db *DBConnection, d *schema.ResourceData) error {
 	database := getDatabase(d, db.client.databaseName)
+
+	// Try without roles workaround first
+	txn1, err := startTransaction(db.client, database)
+	if err != nil {
+		return err
+	}
+	defer deferredRollback(txn1)
+
+	if err := createSchema(db, txn1, d); err != nil {
+		return err
+	}
+
+	if err := txn1.Commit(); err == nil {
+		// Creating worked so we return here
+		d.SetId(generateSchemaID(d, database))
+
+		return resourcePostgreSQLSchemaReadImpl(db, d)
+	}
+
+	// Creating without workaround failed so we fallback to use it.
 	txn, err := startTransaction(db.client, database)
 	if err != nil {
 		return err
