@@ -124,17 +124,18 @@ func resourcePostgreSQLSchemaCreate(db *DBConnection, d *schema.ResourceData) er
 	if err != nil {
 		return err
 	}
-	defer deferredRollback(txn1)
+	attemptErr := createSchema(db, txn1, d)
+	if attemptErr == nil {
+		if err := txn1.Commit(); err == nil {
+			// Creating worked so we return here
+			d.SetId(generateSchemaID(d, database))
 
-	if err := createSchema(db, txn1, d); err != nil {
-		return err
+			return resourcePostgreSQLSchemaReadImpl(db, d)
+		}
 	}
 
-	if err := txn1.Commit(); err == nil {
-		// Creating worked so we return here
-		d.SetId(generateSchemaID(d, database))
-
-		return resourcePostgreSQLSchemaReadImpl(db, d)
+	if err := txn1.Rollback(); err != nil && err != sql.ErrTxDone {
+		return fmt.Errorf("error rolling back initial schema transaction: %w", err)
 	}
 
 	// Creating without workaround failed so we fallback to use it.
