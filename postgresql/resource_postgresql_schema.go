@@ -259,7 +259,7 @@ func resourcePostgreSQLSchemaDelete(db *DBConnection, d *schema.ResourceData) er
 		sql := fmt.Sprintf(
 			"DROP SCHEMA %s %s",
 			pq.QuoteIdentifier(schemaName),
-			dropMode
+			dropMode,
 		)
 
 		_, err := txn.Exec(sql)
