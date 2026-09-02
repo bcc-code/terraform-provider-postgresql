@@ -142,7 +142,7 @@ func resourcePostgreSQLSchemaCreate(db *DBConnection, d *schema.ResourceData) er
 
 	}
 
-	if err := withRolesGranted(txn, rolesToGrant, func() error {
+	if err := trySchemaOperationWithRoleFallback(txn, rolesToGrant, func() error {
 		return createSchema(db, txn, d)
 	}); err != nil {
 		return err
@@ -250,20 +250,22 @@ func resourcePostgreSQLSchemaDelete(db *DBConnection, d *schema.ResourceData) er
 
 	owner := d.Get("owner").(string)
 
-	if err = withRolesGranted(txn, []string{owner}, func() error {
+	if err = trySchemaOperationWithRoleFallback(txn, []string{owner}, func() error {
 		dropMode := "RESTRICT"
 		if d.Get(schemaDropCascade).(bool) {
 			dropMode = "CASCADE"
 		}
 
-		sql := fmt.Sprintf("DROP SCHEMA %s %s", pq.QuoteIdentifier(schemaName), dropMode)
-		if _, err = txn.Exec(sql); err != nil {
-			return fmt.Errorf("error deleting schema: %w", err)
-		}
+		sql := fmt.Sprintf(
+			"DROP SCHEMA %s %s",
+			pq.QuoteIdentifier(schemaName),
+			dropMode
+		)
 
-		return nil
-	}); err != nil {
+		_, err := txn.Exec(sql)
 		return err
+	}); err != nil {
+		return fmt.Errorf("error deleting schema: %w", err)
 	}
 
 	if err := txn.Commit(); err != nil {

@@ -2,6 +2,7 @@ package postgresql
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -233,6 +234,50 @@ func withRolesGranted(txn *sql.Tx, roles []string, fn func() error) error {
 		if _, err := grantRoleMembership(txn, currentUser, role); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func trySchemaOperationWithRoleFallback(
+	txn *sql.Tx,
+	roles []string,
+	operation func() error,
+) error {
+	const savepoint = "schema_direct_attempt"
+
+	if _, err := txn.Exec("SAVEPOINT " + savepoint); err != nil {
+		return fmt.Errorf("creating schema operation savepoint: %w", err)
+	}
+
+	directErr := operation()
+	if directErr == nil {
+		if _, err := txn.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
+			return fmt.Errorf("releasing schema operation savepoint: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := txn.Exec("ROLLBACK TO SAVEPOINT " + savepoint); err != nil {
+		return fmt.Errorf("rolling back failed schema operation: %w", err)
+	}
+	if _, err := txn.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
+		return fmt.Errorf("releasing failed schema operation savepoint: %w", err)
+	}
+
+	pqErr, ok := errors.AsType[*pq.Error](directErr)
+	if !ok || pqErr.Code != "42501" {
+		return directErr
+	}
+
+	log.Printf("[DEBUG] schema operation needs elevated role membership; retrying with role grants")
+
+	if err := withRolesGranted(txn, roles, operation); err != nil {
+		return fmt.Errorf(
+			"schema operation failed after role fallback: %w (direct attempt: %v)",
+			err,
+			directErr,
+		)
 	}
 
 	return nil
